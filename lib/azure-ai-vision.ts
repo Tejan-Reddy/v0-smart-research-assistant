@@ -11,7 +11,7 @@ interface VisionAnalysisResult {
 }
 
 class AzureAIVisionService {
-  private async makeRequest(imageUrl: string, analysisType: "ocr" | "analyze" = "ocr") {
+  private async makeRequest(input: string | Buffer, analysisType: "ocr" | "analyze" = "ocr") {
     const { endpoint, apiKey } = azureConfig.aiVision
 
     if (!endpoint || !apiKey) {
@@ -19,20 +19,42 @@ class AzureAIVisionService {
     }
 
     const url = `${endpoint}/vision/v3.2/${analysisType === "ocr" ? "read/analyze" : "analyze"}`
+    
+    console.log("🔧 Making Azure AI Vision request:")
+    console.log("  URL:", url)
+    console.log("  Input type:", typeof input === 'string' ? 'URL' : 'Buffer')
+    console.log("  Analysis Type:", analysisType)
+
+    let requestBody: string | Buffer
+    let contentType: string
+
+    if (typeof input === 'string') {
+      // URL input
+      requestBody = JSON.stringify({ url: input })
+      contentType = "application/json"
+      console.log("  Image URL:", input)
+    } else {
+      // Binary data input
+      requestBody = input
+      contentType = "application/octet-stream"
+      console.log("  Buffer size:", input.length, "bytes")
+    }
 
     const response = await fetch(url, {
       method: "POST",
       headers: {
         "Ocp-Apim-Subscription-Key": apiKey,
-        "Content-Type": "application/json",
+        "Content-Type": contentType,
       },
-      body: JSON.stringify({
-        url: imageUrl,
-      }),
+      body: requestBody,
     })
 
+    console.log("📊 Azure AI Vision response status:", response.status, response.statusText)
+
     if (!response.ok) {
-      throw new Error(`Azure AI Vision API error: ${response.statusText}`)
+      const errorText = await response.text()
+      console.error("❌ Azure AI Vision error response:", errorText)
+      throw new Error(`Azure AI Vision API error: ${response.statusText} - ${errorText}`)
     }
 
     if (analysisType === "ocr") {

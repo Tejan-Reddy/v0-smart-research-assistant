@@ -13,6 +13,10 @@ import { Separator } from "@/components/ui/separator"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Send, Bot, User, FileText, ExternalLink, ImageIcon, Database, Copy, Download, Share } from "lucide-react"
 
+interface ChatInterfaceProps {
+  initialDisplay?: React.ReactNode
+}
+
 interface ChatMessage {
   id: string
   role: "user" | "assistant"
@@ -25,7 +29,7 @@ interface ChatMessage {
 interface Citation {
   id: string
   title: string
-  sourceType: "pdf" | "image" | "url" | "feed"
+  sourceType: "pdf" | "image" | "url" | "feed" | "document"
   pageNumber?: number
   url?: string
 }
@@ -43,7 +47,7 @@ interface ResearchReport {
   sources: any[]
 }
 
-export function ChatInterface() {
+export function ChatInterface({ initialDisplay }: ChatInterfaceProps) {
   const [inputValue, setInputValue] = useState("")
 
   const { messages, sendMessage, status } = useChat({
@@ -52,7 +56,7 @@ export function ChatInterface() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    if (!inputValue.trim() || status === "in_progress") return
+    if (!inputValue.trim()) return
 
     sendMessage({ text: inputValue })
     setInputValue("")
@@ -223,7 +227,11 @@ export function ChatInterface() {
           </Card>
 
           <div className="text-xs text-muted-foreground mt-1 px-1">
-            {new Date(message.createdAt).toLocaleTimeString()}
+            {(() => {
+              if (!message.createdAt) return new Date().toLocaleTimeString()
+              const date = new Date(message.createdAt)
+              return isNaN(date.getTime()) ? new Date().toLocaleTimeString() : date.toLocaleTimeString()
+            })()}
           </div>
         </div>
 
@@ -236,82 +244,23 @@ export function ChatInterface() {
     )
   }
 
+  const renderContent = (content: string) => {
+    // Basic markdown for bolding and lists
+    let formattedContent = content.replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>")
+    formattedContent = formattedContent.replace(/(\n- .*)+/g, (match) => {
+      const items = match.trim().split('\n').map(item => `<li>${item.substring(2)}</li>`).join('')
+      return `<ul>${items}</ul>`
+    })
+    return <div dangerouslySetInnerHTML={{ __html: formattedContent }} />
+  }
+
   return (
-    <div className="flex flex-col h-full">
-      {/* Chat Messages */}
+    <div className="flex flex-col h-full bg-background/70 backdrop-blur-sm">
       <ScrollArea className="flex-1 p-6">
-        <div className="max-w-4xl mx-auto space-y-6">
-          {messages.length === 0 ? (
-            <div className="text-center py-12">
-              <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-primary/10 mb-4">
-                <Bot className="h-8 w-8 text-primary" />
-              </div>
-              <h2 className="text-2xl font-bold mb-2 text-balance">Start Your Research</h2>
-              <p className="text-muted-foreground text-balance">
-                Ask questions about your sources and get evidence-based reports with citations
-              </p>
-
-              <div className="grid grid-cols-2 gap-4 max-w-2xl mx-auto mt-8">
-                <Card
-                  className="p-4 hover:bg-accent/50 transition-colors cursor-pointer"
-                  onClick={() => setInputValue("What are the key trends in AI adoption?")}
-                >
-                  <h3 className="font-medium mb-1">Analyze Trends</h3>
-                  <p className="text-sm text-muted-foreground">What are the key trends in AI adoption?</p>
-                </Card>
-
-                <Card
-                  className="p-4 hover:bg-accent/50 transition-colors cursor-pointer"
-                  onClick={() => setInputValue("Generate a market analysis report")}
-                >
-                  <h3 className="font-medium mb-1">Market Analysis</h3>
-                  <p className="text-sm text-muted-foreground">Generate a market analysis report</p>
-                </Card>
-
-                <Card
-                  className="p-4 hover:bg-accent/50 transition-colors cursor-pointer"
-                  onClick={() => setInputValue("Compare competitor strategies")}
-                >
-                  <h3 className="font-medium mb-1">Competitor Analysis</h3>
-                  <p className="text-sm text-muted-foreground">Compare competitor strategies</p>
-                </Card>
-
-                <Card
-                  className="p-4 hover:bg-accent/50 transition-colors cursor-pointer"
-                  onClick={() => setInputValue("Summarize key findings from all sources")}
-                >
-                  <h3 className="font-medium mb-1">Synthesize Sources</h3>
-                  <p className="text-sm text-muted-foreground">Summarize key findings from all sources</p>
-                </Card>
-              </div>
-            </div>
-          ) : (
-            messages.map(renderMessage)
-          )}
-
-          {status === "in_progress" && (
-            <div className="flex gap-3">
-              <div className="flex-shrink-0 w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
-                <Bot className="h-4 w-4 text-primary" />
-              </div>
-              <Card className="p-4 bg-card">
-                <div className="flex items-center gap-2">
-                  <div className="animate-pulse flex space-x-1">
-                    <div className="w-2 h-2 bg-primary rounded-full animate-bounce"></div>
-                    <div
-                      className="w-2 h-2 bg-primary rounded-full animate-bounce"
-                      style={{ animationDelay: "0.1s" }}
-                    ></div>
-                    <div
-                      className="w-2 h-2 bg-primary rounded-full animate-bounce"
-                      style={{ animationDelay: "0.2s" }}
-                    ></div>
-                  </div>
-                  <span className="text-sm text-muted-foreground">Analyzing sources...</span>
-                </div>
-              </Card>
-            </div>
-          )}
+        <div className="space-y-6">
+          {messages.length === 0 && initialDisplay
+            ? initialDisplay
+            : messages.map((m) => renderMessage(m))}
         </div>
       </ScrollArea>
 
@@ -325,13 +274,13 @@ export function ChatInterface() {
                 value={inputValue}
                 onChange={(e) => setInputValue(e.target.value)}
                 className="pr-12 h-12 text-base"
-                disabled={status === "in_progress"}
+                disabled={false}
               />
               <Button
                 type="submit"
                 size="sm"
                 className="absolute right-2 top-2 h-8 w-8 p-0"
-                disabled={!inputValue.trim() || status === "in_progress"}
+                disabled={!inputValue.trim()}
               >
                 <Send className="h-4 w-4" />
               </Button>

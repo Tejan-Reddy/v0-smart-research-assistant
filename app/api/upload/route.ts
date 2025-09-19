@@ -6,43 +6,58 @@ import { azureCosmosDB } from "@/lib/azure-cosmos-db"
 
 export async function POST(request: NextRequest) {
   try {
+    console.log("🚀 Upload API called")
     const formData = await request.formData()
     const file = formData.get("file") as File
-    const userId = (formData.get("userId") as string) || "anonymous"
+    const userId = (formData.get("userId") as string)
+    
+    if (!userId) {
+      console.error("❌ User ID is required")
+      return NextResponse.json({ error: "User ID is required" }, { status: 400 })
+    }
 
     if (!file) {
+      console.error("❌ No file provided")
       return NextResponse.json({ error: "No file provided" }, { status: 400 })
     }
+
+    console.log(`📄 Received file: ${file.name} for user: ${userId}`)
 
     // Generate unique filename
     const timestamp = Date.now()
     const fileName = `${timestamp}-${file.name.replace(/[^a-zA-Z0-9.-]/g, "_")}`
 
     // Upload to Azure Blob Storage
+    console.log("☁️ Uploading to Azure Blob Storage...")
     const fileUrl = await azureBlobStorage.uploadFile(file, fileName)
+    console.log(`✅ File uploaded to: ${fileUrl}`)
 
     // Process based on file type
     let extractedText = ""
     let processingTime = Date.now()
 
-    if (file.type.startsWith("image/")) {
-      // Extract text from image using Azure AI Vision
+    console.log(`⚙️ Processing file type: ${file.type}`)
+    if (file.type.startsWith("image/") || file.type === "application/pdf") {
+      // Extract text from image or PDF using Azure AI Vision
+      console.log("👁️ Extracting text with Azure AI Vision...")
       const visionResult = await azureAIVision.extractTextFromImage(fileUrl)
       extractedText = visionResult.text
-    } else if (file.type === "application/pdf") {
-      // For PDF, you would typically use a PDF parsing library
-      // For demo purposes, we'll simulate text extraction
-      extractedText = `Extracted text from PDF: ${file.name}`
+      console.log("👁️ Text extracted from image/PDF")
     } else {
       // For other text files, read content directly
+      console.log("📝 Reading text from file...")
       extractedText = await file.text()
+      console.log("📝 Text read from file")
     }
 
     processingTime = Date.now() - processingTime
+    console.log(`⏱️ Processing time: ${processingTime}ms`)
 
     // Index in Azure Cognitive Search
-    const searchDocument = {
-      id: fileName,
+    console.log("🔍 Indexing in Azure Cognitive Search...")
+    const documentId = Buffer.from(fileName).toString("base64url")
+    const indexableDocument = {
+      id: documentId,
       title: file.name,
       content: extractedText,
       sourceType: file.type.startsWith("image/")
@@ -52,42 +67,34 @@ export async function POST(request: NextRequest) {
           : ("document" as const),
       sourceUrl: fileUrl,
       extractedText,
-      metadata: {
-        fileSize: file.size,
-        fileType: file.type,
-        uploadedAt: new Date().toISOString(),
-      },
       timestamp: new Date().toISOString(),
     }
+    await azureCognitiveSearch.indexDocument(indexableDocument)
+    console.log("✅ Document indexed successfully")
 
-    await azureCognitiveSearch.indexDocument(searchDocument)
-
-    // Record usage in Cosmos DB
+    // Record usage in Azure Cosmos DB
+    console.log("💾 Recording usage in Azure Cosmos DB...")
     await azureCosmosDB.recordUsage({
       userId,
       action: "source_processed",
       metadata: {
-        sourceType: searchDocument.sourceType,
+        sourceType: indexableDocument.sourceType,
         processingTime,
         creditsUsed: 1,
         success: true,
       },
     })
+    console.log("✅ Usage recorded successfully")
 
     return NextResponse.json({
-      success: true,
-      file: {
-        id: fileName,
-        name: file.name,
-        type: searchDocument.sourceType,
-        size: `${(file.size / 1024 / 1024).toFixed(1)} MB`,
-        status: "indexed",
-        url: fileUrl,
-        extractedText: extractedText.substring(0, 200) + "...",
-      },
+      message: "File uploaded and processed successfully",
+      document: indexableDocument,
     })
   } catch (error) {
-    console.error("Upload error:", error)
-    return NextResponse.json({ error: "Failed to upload and process file" }, { status: 500 })
+    console.error("🚨 Upload API Error:", error)
+    return NextResponse.json(
+      { error: "Failed to process file", details: error instanceof Error ? error.message : "Unknown error" },
+      { status: 500 },
+    )
   }
 }

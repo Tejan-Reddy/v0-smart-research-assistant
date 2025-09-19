@@ -4,7 +4,7 @@ import { azureConfig } from "./azure-config"
 interface UsageRecord {
   id: string
   userId: string
-  action: "report_generated" | "source_processed" | "search_performed"
+  action: "report_generated" | "source_processed" | "search_performed" | "summary_generated"
   timestamp: string
   metadata: {
     reportType?: string
@@ -12,6 +12,9 @@ interface UsageRecord {
     processingTime?: number
     creditsUsed?: number
     success?: boolean
+    sourcesUsed?: number
+    error?: string
+    [key: string]: any // Allow additional properties
   }
 }
 

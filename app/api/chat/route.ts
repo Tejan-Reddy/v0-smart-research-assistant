@@ -8,21 +8,38 @@ export const maxDuration = 30
 
 // Enhanced tool for searching through Azure Cognitive Search
 const searchSourcesTool = tool({
-  description: "Search through indexed sources using Azure Cognitive Search",
+  description: "Search through indexed sources using Azure Cognitive Search. Can be used to get a summary of all documents.",
   inputSchema: z.object({
-    query: z.string().describe("The search query to find relevant information"),
+    query: z.string().nullable().optional().describe("The search query to find relevant information. If empty or null, will return all documents."),
     sourceTypes: z
-      .array(z.enum(["pdf", "image", "url", "feed"]))
+      .array(z.enum(["pdf", "image", "url", "feed", "document"]))
       .optional()
       .describe("Filter by source types"),
   }),
   execute: async ({ query, sourceTypes }) => {
     try {
-      const results = await azureCognitiveSearch.searchDocuments(query, {
+      const searchQuery = query || "*"
+      console.log('🔍 SearchSources tool called with query:', searchQuery)
+      console.log('🔧 Azure config check:', {
+        endpoint: process.env.AZURE_SEARCH_ENDPOINT,
+        hasApiKey: !!process.env.AZURE_SEARCH_API_KEY
+      })
+      
+      const results = await azureCognitiveSearch.searchDocuments(searchQuery, {
         sourceTypes,
         top: 5,
       })
 
+      console.log('✅ Search results:', results.length, 'documents found')
+      
+      if (results.length === 0) {
+        return {
+          results: [],
+          message: "No documents found in the search index. Please upload some documents first using the 'Add Source' button in the left panel, then try searching again.",
+          isEmpty: true
+        }
+      }
+      
       return {
         results: results.map((result) => ({
           id: result.id,
@@ -36,7 +53,9 @@ const searchSourcesTool = tool({
         })),
       }
     } catch (error) {
-      console.error("Search error:", error)
+      console.error("🚨 Search error details:", error)
+      console.error("🚨 Error message:", error instanceof Error ? error.message : 'Unknown error')
+      console.error("🚨 Error stack:", error instanceof Error ? error.stack : 'No stack trace')
       return {
         results: [],
         error: "Failed to search sources",
@@ -140,11 +159,76 @@ const generateReportTool = tool({
 })
 
 export async function POST(req: Request) {
-  const { messages }: { messages: UIMessage[] } = await req.json()
+  try {
+    const body = await req.json()
+    console.log('📥 Request body:', JSON.stringify(body, null, 2))
+    
+    const { messages }: { messages: UIMessage[] } = body
+    
+    if (!messages || !Array.isArray(messages)) {
+      return new Response(JSON.stringify({ error: 'Invalid messages format' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' }
+      })
+    }
 
-  const result = streamText({
-    model: google("gemini-2.0-flash-exp"),
-    messages: convertToModelMessages(messages),
+    // Debug: Check if environment variables are loaded
+    console.log('🔍 Environment Variables Check:')
+    console.log('AZURE_SEARCH_ENDPOINT:', process.env.AZURE_SEARCH_ENDPOINT ? 'SET' : 'NOT SET')
+    console.log('AZURE_SEARCH_API_KEY:', process.env.AZURE_SEARCH_API_KEY ? 'SET' : 'NOT SET')
+    console.log('AZURE_COSMOS_ENDPOINT:', process.env.AZURE_COSMOS_ENDPOINT ? 'SET' : 'NOT SET')
+    console.log('GOOGLE_GENERATIVE_AI_API_KEY:', process.env.GOOGLE_GENERATIVE_AI_API_KEY ? 'SET' : 'NOT SET')
+
+    console.log('📨 Messages received:', JSON.stringify(messages, null, 2))
+    console.log('📨 First message keys:', Object.keys(messages[0] || {}))
+
+    // Convert messages to the correct format for AI SDK
+    const modelMessages = messages.map(msg => {
+      let content = '';
+      
+      // Handle different message formats
+      if ((msg as any).content) {
+        // Simple content field
+        content = (msg as any).content;
+      } else if ((msg as any).parts) {
+        // Parts array format (from useChat hook)
+        const parts = (msg as any).parts;
+        if (Array.isArray(parts)) {
+          // Extract text content from parts
+          const textParts = parts
+            .filter(part => part.type === 'text')
+            .map(part => part.text)
+            .filter(text => text && text.trim().length > 0);
+          
+          content = textParts.join(' ');
+          
+          // If no text content but there are tool calls, skip this message
+          // The AI SDK will handle tool call messages properly
+          if (!content && parts.some(part => part.type && part.type.startsWith('tool-'))) {
+            return null; // Skip assistant messages with only tool calls
+          }
+        }
+      }
+      
+      // Ensure we have some content
+      if (!content || content.trim().length === 0) {
+        if (msg.role === 'assistant') {
+          return null; // Skip empty assistant messages
+        }
+        content = ' '; // Provide minimal content for user messages
+      }
+      
+      return {
+        role: msg.role,
+        content: content.trim()
+      };
+    }).filter(msg => msg !== null) // Remove null messages
+
+    console.log('🔄 Converted messages:', JSON.stringify(modelMessages, null, 2))
+
+    const result = streamText({
+      model: google("gemini-2.0-flash-exp"),
+      messages: modelMessages,
     tools: {
       searchSources: searchSourcesTool,
       generateReport: generateReportTool,
@@ -152,28 +236,52 @@ export async function POST(req: Request) {
     system: `You are ResearchAI, an advanced research assistant powered by Azure AI services including Cognitive Search, AI Vision, and Cosmos DB for comprehensive document analysis and usage tracking.
 
 Your capabilities:
-1. Search through indexed sources using Azure Cognitive Search with advanced relevance scoring
-2. Extract text from images using Azure AI Vision OCR
-3. Generate structured reports with proper citations and evidence-based insights
-4. Track usage and provide analytics through Azure Cosmos DB
+1. Search through indexed sources using Azure Cognitive Search with advanced relevance scoring.
+2. Extract text from images using Azure AI Vision OCR.
+3. Generate structured reports with proper citations and evidence-based insights.
+4. Track usage and provide analytics through Azure Cosmos DB.
+
+CRITICAL INSTRUCTION FOR TOOL USAGE:
+When a user asks ANY of the following, IMMEDIATELY use the 'searchSources' tool:
+- "summary" or "summarize" 
+- "what documents do I have"
+- "search" or "find"
+- "generate report"
+- "show me all files/documents"
+- "what's in my knowledge base"
+- Any question about content or documents
+
+For general summaries or when the user wants all documents:
+- Call 'searchSources' with query set to null or "*" to get all documents
+- For specific topics, use the topic as the search query
 
 When a user asks a question:
-1. Use searchSources to find relevant information from Azure Cognitive Search
-2. For comprehensive analysis, use generateReport to create structured reports
-3. Always cite sources with specific references and relevance scores
-4. Provide evidence-based insights with proper attribution
-5. Usage is automatically tracked for analytics and billing
+1. ALWAYS start by using the 'searchSources' tool to find relevant information from Azure Cognitive Search.
+2. If the user asks for a general summary, overview, or mentions "all documents/files", call 'searchSources' with query: null to get all documents.
+3. For comprehensive analysis, use 'generateReport' to create structured reports.
+4. Always cite sources with specific references and relevance scores.
+5. Provide evidence-based insights with proper attribution.
+6. Usage is automatically tracked for analytics and billing.
+
+IMPORTANT: If 'searchSources' returns no results or indicates an empty index, inform the user that they need to upload documents first using the "Add Source" button in the left panel before you can search through their files.
 
 Format responses with clear structure, citations, and actionable insights. Leverage Azure's AI capabilities for the most accurate and comprehensive research assistance.`,
     maxOutputTokens: 2000,
     temperature: 0.3,
   })
 
-  return result.toUIMessageStreamResponse({
-    onFinish: async ({ isAborted }) => {
-      if (isAborted) {
-        console.log("Chat request aborted")
-      }
-    },
-  })
+    return result.toUIMessageStreamResponse({
+      onFinish: async ({ isAborted }) => {
+        if (isAborted) {
+          console.log("Chat request aborted")
+        }
+      },
+    })
+  } catch (error) {
+    console.error('🚨 Chat API Error:', error)
+    return new Response(JSON.stringify({ error: 'Internal server error' }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json' }
+    })
+  }
 }

@@ -3,12 +3,15 @@
 import type React from "react"
 
 import { useState, useCallback } from "react"
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogDescription } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Progress } from "@/components/ui/progress"
 import { Upload, FileText, ImageIcon, X, CheckCircle, AlertCircle, Music } from "lucide-react"
 import { useDropzone } from "react-dropzone"
+import { useUser } from "@/lib/user-context"
+import { appConfig } from "@/lib/app-config"
+import { APP_CONSTANTS } from "@/lib/constants"
 
 interface UploadedFile {
   id: string
@@ -26,6 +29,7 @@ interface SourceUploadDialogProps {
 export function SourceUploadDialog({ onSourceAdded, children }: SourceUploadDialogProps) {
   const [open, setOpen] = useState(false)
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([])
+  const { user } = useUser()
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
     const newFiles: UploadedFile[] = acceptedFiles.map((file) => ({
@@ -44,57 +48,56 @@ export function SourceUploadDialog({ onSourceAdded, children }: SourceUploadDial
 
     setUploadedFiles((prev) => [...prev, ...newFiles])
 
-    // Simulate upload progress
+    // Start the actual upload process
     newFiles.forEach((uploadFile) => {
-      simulateUpload(uploadFile.id)
+      uploadAndProcessFile(uploadFile)
     })
-  }, [])
+  }, [user])
+
+  const uploadAndProcessFile = async (uploadedFile: UploadedFile) => {
+    try {
+      const formData = new FormData()
+      formData.append("file", uploadedFile.file)
+      formData.append("userId", user?.id || "anonymous")
+
+      const response = await fetch("/api/upload", {
+        method: "POST",
+        body: formData,
+      })
+
+      if (!response.ok) {
+        throw new Error("Upload failed")
+      }
+
+      const result = await response.json()
+
+      // Update file status to completed
+      setUploadedFiles((prev) =>
+        prev.map((f) => (f.id === uploadedFile.id ? { ...f, status: "completed" as const, progress: 100 } : f)),
+      )
+
+      // Add to sources list
+      onSourceAdded({
+        id: result.document.id,
+        name: result.document.title,
+        type: result.document.sourceType,
+        size: `${(uploadedFile.file.size / 1024 / 1024).toFixed(1)} MB`,
+        status: "indexed",
+      })
+    } catch (error) {
+      console.error("Upload and processing error:", error)
+      setUploadedFiles((prev) =>
+        prev.map((f) => (f.id === uploadedFile.id ? { ...f, status: "error" as const } : f)),
+      )
+    }
+  }
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
-    accept: {
-      "application/pdf": [".pdf"],
-      "text/*": [".txt", ".md"],
-      "application/msword": [".doc"],
-      "application/vnd.openxmlformats-officedocument.wordprocessingml.document": [".docx"],
-      "audio/*": [".mp3", ".wav", ".m4a", ".aac", ".ogg"],
-    },
-    maxSize: 50 * 1024 * 1024, // 50MB
+    accept: appConfig.upload.allowedTypes,
+    maxSize: appConfig.upload.maxFileSize,
+    maxFiles: appConfig.upload.maxFiles,
   })
-
-  const simulateUpload = (fileId: string) => {
-    const interval = setInterval(() => {
-      setUploadedFiles((prev) =>
-        prev.map((file) => {
-          if (file.id === fileId) {
-            if (file.progress < 100) {
-              return { ...file, progress: file.progress + 10 }
-            } else if (file.status === "uploading") {
-              return { ...file, status: "processing" }
-            } else if (file.status === "processing") {
-              // Simulate processing completion
-              setTimeout(() => {
-                setUploadedFiles((prev) => prev.map((f) => (f.id === fileId ? { ...f, status: "completed" } : f)))
-
-                // Add to sources list
-                onSourceAdded({
-                  id: Date.now(),
-                  name: file.file.name,
-                  type: file.type,
-                  size: `${(file.file.size / 1024 / 1024).toFixed(1)} MB`,
-                  status: "indexed",
-                })
-              }, 2000)
-
-              clearInterval(interval)
-              return { ...file, status: "processing" }
-            }
-          }
-          return file
-        }),
-      )
-    }, 200)
-  }
 
   const removeFile = (fileId: string) => {
     setUploadedFiles((prev) => prev.filter((file) => file.id !== fileId))
@@ -130,13 +133,16 @@ export function SourceUploadDialog({ onSourceAdded, children }: SourceUploadDial
         {children || (
           <Button className="gap-2">
             <Upload className="h-4 w-4" />
-            Upload Source
+            {APP_CONSTANTS.UI_TEXT.UPLOAD_SOURCE}
           </Button>
         )}
       </DialogTrigger>
       <DialogContent className="max-w-2xl">
         <DialogHeader>
-          <DialogTitle>Upload Source</DialogTitle>
+          <DialogTitle>{APP_CONSTANTS.UI_TEXT.UPLOAD_SOURCE}</DialogTitle>
+          <DialogDescription>
+            {APP_CONSTANTS.UI_TEXT.UPLOAD_DESCRIPTION}
+          </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4">
@@ -150,7 +156,7 @@ export function SourceUploadDialog({ onSourceAdded, children }: SourceUploadDial
             <div className="text-center">
               <Upload className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
               <h3 className="text-lg font-medium mb-2">
-                {isDragActive ? "Drop files here" : "Drag & drop files here"}
+                {isDragActive ? "Drop files here" : APP_CONSTANTS.UI_TEXT.DRAG_DROP_TEXT}
               </h3>
               <p className="text-muted-foreground mb-4">or click to browse files</p>
               <p className="text-sm text-muted-foreground">

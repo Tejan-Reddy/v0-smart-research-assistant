@@ -3,6 +3,7 @@ import type { Metadata } from "next"
 import { GeistSans } from "geist/font/sans"
 import { GeistMono } from "geist/font/mono"
 import { Suspense } from "react"
+import { UserProvider } from "@/lib/user-context"
 import "./globals.css"
 
 export const metadata: Metadata = {
@@ -19,7 +20,9 @@ export default function RootLayout({
   return (
     <html lang="en" className="dark">
       <body className={`font-sans ${GeistSans.variable} ${GeistMono.variable} antialiased`}>
-        <Suspense fallback={null}>{children}</Suspense>
+        <UserProvider>
+          <Suspense fallback={null}>{children}</Suspense>
+        </UserProvider>
       </body>
     </html>
   )

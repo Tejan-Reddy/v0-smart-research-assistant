@@ -9,9 +9,9 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { FileText, ImageIcon, Globe, Database, Search, MoreVertical, Trash2, RefreshCw, Eye } from "lucide-react"
 
 interface Source {
-  id: number
+  id: string
   name: string
-  type: "pdf" | "image" | "url" | "feed"
+  type: "pdf" | "image" | "url" | "feed" | "document"
   size: string
   status: "indexed" | "processing" | "error"
   lastUpdated?: string
@@ -19,8 +19,8 @@ interface Source {
 
 interface SourceListProps {
   sources: Source[]
-  onSourceRemove: (id: number) => void
-  onSourceRefresh: (id: number) => void
+  onSourceRemove: (id: string) => void
+  onSourceRefresh: (id: string) => void
 }
 
 export function SourceList({ sources, onSourceRemove, onSourceRefresh }: SourceListProps) {

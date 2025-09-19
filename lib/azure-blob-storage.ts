@@ -27,9 +27,7 @@ class AzureBlobStorageService {
       const containerClient = blobServiceClient.getContainerClient(azureConfig.blobStorage.containerName)
 
       // Ensure container exists
-      await containerClient.createIfNotExists({
-        access: "blob",
-      })
+      await containerClient.createIfNotExists()
 
       const blockBlobClient = containerClient.getBlockBlobClient(fileName)
 
@@ -59,6 +57,41 @@ class AzureBlobStorageService {
     } catch (error) {
       console.error("Error deleting file from Azure Blob Storage:", error)
       throw new Error("Failed to delete file")
+    }
+  }
+
+  async getFileBuffer(fileName: string): Promise<Buffer> {
+    try {
+      const blobServiceClient = this.initializeClient()
+      const containerClient = blobServiceClient.getContainerClient(azureConfig.blobStorage.containerName)
+      const blockBlobClient = containerClient.getBlockBlobClient(fileName)
+
+      const response = await blockBlobClient.download()
+      
+      if (!response.readableStreamBody) {
+        throw new Error("No stream body in response")
+      }
+
+      // Convert ReadableStream to Buffer
+      const chunks: Buffer[] = []
+      const stream = response.readableStreamBody as NodeJS.ReadableStream
+      
+      return new Promise((resolve, reject) => {
+        stream.on('data', (chunk: Buffer) => {
+          chunks.push(chunk)
+        })
+        
+        stream.on('end', () => {
+          resolve(Buffer.concat(chunks))
+        })
+        
+        stream.on('error', (error) => {
+          reject(error)
+        })
+      })
+    } catch (error) {
+      console.error("Error downloading file from Azure Blob Storage:", error)
+      throw new Error("Failed to download file")
     }
   }
 
